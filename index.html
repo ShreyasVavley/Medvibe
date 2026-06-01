@@ -1,0 +1,958 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedVibe | Intake Terminal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- PDF & Snapshot Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <style>
+        :root {
+            --bg-canvas: #F3F4F6;
+            --border-color: #000000;
+            --shadow-color: #000000;
+            --panel-1-bg: #FFFFFF;
+            --panel-2-bg: #D1D5DB;
+            --panel-3-bg: #0052FF;
+            --danger-bg: #FF3333;
+            --warn-bg: #FFD000;
+            --safe-bg: #33FF99;
+        }
+
+        body {
+            background-color: var(--bg-canvas);
+            background-image: 
+                linear-gradient(rgba(0, 0, 0, 0.1) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 0, 0, 0.1) 1px, transparent 1px);
+            background-size: 20px 20px;
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .mono { font-family: 'JetBrains Mono', 'Roboto Mono', monospace; }
+        .brutal-border { border: 3px solid var(--border-color); }
+        .brutal-shadow {
+            box-shadow: 5px 5px 0px 0px var(--shadow-color);
+            transition: transform 0ms, box-shadow 0ms;
+        }
+        .brutal-shadow:active:not(:disabled) {
+            transform: translate(5px, 5px);
+            box-shadow: 0px 0px 0px 0px var(--shadow-color);
+        }
+
+        .panel { height: 100vh; overflow-y: auto; }
+        #panel-1 { width: 30%; background-color: var(--panel-1-bg); border-right: 3px solid var(--border-color); }
+        #panel-2 { width: 45%; background-color: var(--panel-2-bg); border-right: 3px solid var(--border-color); }
+        #panel-3 { width: 25%; background-color: var(--panel-3-bg); color: #fff; }
+
+        @keyframes popIn {
+            0% { transform: scale(0); }
+            100% { transform: scale(1); }
+        }
+        .animate-pop { animation: popIn 100ms steps(1) forwards; }
+
+        @keyframes strobe {
+            0% { background-color: var(--panel-1-bg); }
+            50% { background-color: var(--danger-bg); }
+            100% { background-color: var(--panel-1-bg); }
+        }
+        @keyframes judder {
+            0% { transform: translateX(0); }
+            25% { transform: translateX(-5px); }
+            50% { transform: translateX(5px); }
+            75% { transform: translateX(-5px); }
+            100% { transform: translateX(0); }
+        }
+        .strobe-alert {
+            animation: strobe 300ms steps(1) infinite, judder 300ms steps(1) infinite;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 0.75rem;
+            margin-bottom: 1rem;
+            background: #fff;
+            outline: none;
+        }
+        input:focus, select:focus, textarea:focus {
+            background: #f0f0f0;
+        }
+
+        #toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            z-index: 1000;
+        }
+        
+        #validation-tick {
+            display: none;
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            font-size: 2rem;
+            color: #000;
+            background: #33FF99;
+            padding: 0.2rem 0.5rem;
+        }
+
+        .bionic b { font-weight: 900; }
+        .log-entry { margin-bottom: 0.5rem; word-break: break-all; }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.8);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: #fff;
+            color: #000;
+            width: 80%;
+            max-width: 600px;
+            padding: 2rem;
+        }
+        
+        /* Auth Overlay */
+        #auth-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- AUTHENTICATION OVERLAY -->
+    <div id="auth-overlay">
+        <div class="brutal-border brutal-shadow bg-white p-8 max-w-sm w-full font-mono">
+            <h2 class="text-3xl font-black uppercase tracking-wider mb-6 border-b-4 border-black pb-2 text-center" id="auth-title">SYSTEM LOCK</h2>
+            <p id="auth-error" class="text-red-600 font-bold mb-4 hidden uppercase text-sm"></p>
+            <form id="login-form">
+                <label class="block font-bold mb-1">OPERATOR ID</label>
+                <input type="text" id="username" class="brutal-border brutal-shadow mb-4" required>
+                <label class="block font-bold mb-1">PASSCODE</label>
+                <input type="password" id="password" class="brutal-border brutal-shadow mb-6" required>
+                <button type="submit" class="w-full bg-black text-white brutal-border brutal-shadow py-3 text-xl font-bold uppercase hover:bg-gray-800">Authenticate</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Top Nav -->
+    <div class="flex border-b-4 border-black font-mono shrink-0">
+        <button id="btn-terminal" onclick="switchView('terminal')" class="flex-1 bg-yellow-400 p-4 font-bold uppercase text-xl border-r-4 border-black active:translate-x-1 active:translate-y-1 active:shadow-none transition-all duration-75">
+            [TERMINAL VIEW]
+        </button>
+        <button id="btn-metrics" onclick="switchView('metrics')" class="flex-1 bg-gray-200 p-4 font-bold uppercase text-xl active:translate-x-1 active:translate-y-1 active:shadow-none transition-all duration-75">
+            [METRICS ENGINE]
+        </button>
+        <button id="btn-logout" onclick="logout()" class="w-32 bg-red-500 text-white p-4 font-bold uppercase text-xl active:translate-x-1 active:translate-y-1 active:shadow-none transition-all duration-75 border-l-4 border-black">
+            LOGOUT
+        </button>
+    </div>
+
+    <!-- TERMINAL VIEW -->
+    <div id="view-terminal" class="flex flex-1 overflow-hidden w-full">
+        <!-- PANEL 1: THE INTAKE GATE -->
+        <div id="panel-1" class="panel p-6 relative">
+            <div id="validation-tick" class="brutal-border brutal-shadow font-bold animate-pop">✓</div>
+            
+            <div class="flex justify-between items-center mb-6 brutal-border brutal-shadow p-2 bg-yellow-300">
+                <h1 class="text-2xl font-bold uppercase mono tracking-tighter" data-i18n="intake_title">Intake Gate</h1>
+                <div class="flex gap-2">
+                    <button id="lang-toggle" class="brutal-border px-2 py-1 bg-black text-white text-xs mono">EN</button>
+                    <button id="bionic-toggle" class="brutal-border px-2 py-1 bg-black text-white text-xs mono">BIONIC: OFF</button>
+                </div>
+            </div>
+
+            <form id="intake-form" class="relative">
+                <label class="block font-bold mb-1 bionic-target" data-i18n="name_label">Patient Name</label>
+                <input type="text" id="p-name" class="brutal-border brutal-shadow" required>
+
+                <label class="block font-bold mb-1 bionic-target" data-i18n="age_label">Age</label>
+                <input type="number" id="p-age" class="brutal-border brutal-shadow" required>
+
+                <label class="block font-bold mb-1 bionic-target" data-i18n="dept_label">Target Department</label>
+                <select id="p-dept" class="brutal-border brutal-shadow" required>
+                    <option value="General">General</option>
+                    <option value="Orthopedics">Orthopedics</option>
+                    <option value="Cardiology">Cardiology</option>
+                    <option value="Emergency">Emergency</option>
+                </select>
+
+                <div class="flex justify-between items-end mb-1">
+                    <label class="font-bold bionic-target" data-i18n="complaint_label">Primary Complaint</label>
+                    <div class="flex gap-2">
+                        <button type="button" id="voice-btn" class="brutal-border bg-red-500 text-white px-3 py-1 text-xs mono uppercase brutal-shadow" data-i18n="voice_btn">MIC: OFF</button>
+                        <button type="button" id="refine-btn" class="brutal-border bg-blue-500 text-white px-3 py-1 text-xs mono uppercase brutal-shadow">AI REFINE</button>
+                    </div>
+                </div>
+                <textarea id="p-complaint" rows="4" class="brutal-border brutal-shadow" required></textarea>
+
+                <button type="submit" class="w-full mt-4 bg-green-400 brutal-border brutal-shadow py-3 text-xl font-bold uppercase" data-i18n="submit_btn">Generate Token</button>
+            </form>
+        </div>
+
+        <!-- PANEL 2: THE SORTING MAT -->
+        <div id="panel-2" class="panel p-6">
+            <h2 class="text-2xl font-bold uppercase mono mb-6 brutal-border bg-white p-2 brutal-shadow tracking-tighter inline-block">Sorting Mat (Live Queue)</h2>
+            
+            <div id="kanban-board" class="flex flex-col gap-4">
+                <!-- Patient cards will drop here -->
+            </div>
+        </div>
+
+        <!-- PANEL 3: THE COMMAND CONSOLE -->
+        <div id="panel-3" class="panel p-6 flex flex-col">
+            <h2 class="text-2xl font-bold uppercase mono mb-6 bg-black p-2 brutal-border border-white text-white tracking-tighter">Command Console</h2>
+            
+            <div class="mb-6 brutal-border bg-white text-black p-4 brutal-shadow flex justify-between items-center">
+                <span class="font-bold uppercase">Network:</span>
+                <div id="ping-status" class="w-4 h-4 brutal-border bg-green-400"></div>
+            </div>
+
+            <button id="report-btn" class="w-full mb-4 bg-yellow-400 text-black brutal-border brutal-shadow py-3 font-bold uppercase">Executive Report</button>
+            
+            <button id="purge-btn" class="w-full mb-6 bg-red-500 text-black brutal-border brutal-shadow py-3 font-bold uppercase">Clear Processed Entries</button>
+
+            <!-- Audit Trail -->
+            <div class="flex-grow brutal-border bg-black text-green-400 p-2 overflow-y-auto mono text-xs" id="audit-log">
+                <div class="log-entry">[SYSTEM] INITIALIZED</div>
+            </div>
+        </div>
+    </div> <!-- END TERMINAL VIEW -->
+
+    <!-- METRICS VIEW -->
+    <div id="view-metrics" class="hidden p-6 flex-col gap-6 font-mono flex-1 overflow-auto bg-gray-200">
+        <h2 class="text-3xl font-black uppercase tracking-wider bg-black text-white p-2 inline-block self-start">SYSTEM DATA INFRASTRUCTURE</h2>
+        <div class="border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+            <canvas id="neoChart" class="w-full max-h-[500px]"></canvas>
+        </div>
+    </div>
+
+    <!-- QR Modal -->
+    <div id="qr-modal" class="modal">
+        <div class="modal-content brutal-border brutal-shadow relative">
+            <button class="close-modal absolute top-2 right-2 brutal-border px-2 py-1 bg-red-500 text-white font-bold">X</button>
+            <h3 class="text-xl font-bold uppercase mono mb-4 border-b-4 border-black pb-2" id="qr-title">Token View</h3>
+            <div id="qrcode-container" class="flex justify-center mb-4"></div>
+            <div id="qr-details" class="mono text-sm"></div>
+        </div>
+    </div>
+
+    <!-- Report Modal -->
+    <div id="report-modal" class="modal">
+        <div class="modal-content brutal-border brutal-shadow relative">
+            <button class="close-modal absolute top-2 right-2 brutal-border px-2 py-1 bg-red-500 text-white font-bold">X</button>
+            <h3 class="text-xl font-bold uppercase mono mb-4 border-b-4 border-black pb-2">Session Report</h3>
+            <div id="report-content" class="mono text-sm whitespace-pre"></div>
+        </div>
+    </div>
+
+    <!-- AI Refine Modal -->
+    <div id="refine-modal" class="modal">
+        <div class="modal-content brutal-border brutal-shadow relative flex flex-col h-[70vh]">
+            <button class="close-modal absolute top-2 right-2 brutal-border px-2 py-1 bg-red-500 text-white font-bold">X</button>
+            <h3 class="text-xl font-bold uppercase mono mb-4 border-b-4 border-black pb-2">AI Refinement Chat</h3>
+            <div id="refine-chat-window" class="flex-grow overflow-y-auto mb-4 p-2 bg-gray-100 brutal-border flex flex-col gap-2">
+                <!-- Chat msg -->
+            </div>
+            <div class="flex gap-2">
+                <input type="text" id="refine-input" class="brutal-border flex-grow p-2 mono" placeholder="Answer AI...">
+                <button id="refine-send-btn" class="brutal-border bg-black text-white px-4 font-bold uppercase">SEND</button>
+            </div>
+            <button id="refine-apply-btn" class="w-full mt-4 bg-green-400 brutal-border brutal-shadow py-2 font-bold uppercase hidden">Apply to Complaint</button>
+        </div>
+    </div>
+
+    <!-- Offline Toast -->
+    <div id="toast" class="brutal-border brutal-shadow bg-yellow-400 text-black p-4 font-bold uppercase">
+        Network Disconnected - Caching Locally
+    </div>
+
+    <script>
+        // --- Auth State ---
+        let jwtToken = localStorage.getItem('jwt_token') || null;
+
+        function checkAuth() {
+            if (!jwtToken) {
+                document.getElementById('auth-overlay').style.display = 'flex';
+                document.getElementById('auth-title').textContent = 'SYSTEM LOCK';
+            } else {
+                document.getElementById('auth-overlay').style.display = 'none';
+            }
+        }
+
+        document.getElementById('login-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new URLSearchParams();
+            formData.append('username', document.getElementById('username').value);
+            formData.append('password', document.getElementById('password').value);
+
+            try {
+                const res = await fetch('/token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: formData.toString()
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    jwtToken = data.access_token;
+                    localStorage.setItem('jwt_token', jwtToken);
+                    document.getElementById('auth-overlay').style.display = 'none';
+                    document.getElementById('auth-error').classList.add('hidden');
+                    
+                    // Immediately fire sync logic if we were prompted due to expiry
+                    if (AppState.isOnline) {
+                        await syncOfflineQueue();
+                        await fetchPatients();
+                    }
+                } else {
+                    document.getElementById('auth-error').textContent = 'INVALID CREDENTIALS';
+                    document.getElementById('auth-error').classList.remove('hidden');
+                }
+            } catch (error) {
+                document.getElementById('auth-error').textContent = 'NETWORK ERROR';
+                document.getElementById('auth-error').classList.remove('hidden');
+            }
+        });
+
+        function logout() {
+            jwtToken = null;
+            localStorage.removeItem('jwt_token');
+            checkAuth();
+        }
+
+        function getAuthHeaders() {
+            return {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${jwtToken}`
+            };
+        }
+
+        function handleApiError(res) {
+            if (res.status === 401) {
+                jwtToken = null;
+                localStorage.removeItem('jwt_token');
+                document.getElementById('auth-title').textContent = 'SESSION EXPIRED: RE-AUTHENTICATE TO SYNC';
+                document.getElementById('auth-overlay').style.display = 'flex';
+                return true;
+            }
+            return false;
+        }
+
+        // --- Chart & View State ---
+        let myChart = null;
+
+        function switchView(view) {
+            if (view === 'terminal') {
+                document.getElementById('view-terminal').classList.remove('hidden');
+                document.getElementById('view-terminal').classList.add('flex');
+                document.getElementById('view-metrics').classList.add('hidden');
+            } else {
+                document.getElementById('view-terminal').classList.add('hidden');
+                document.getElementById('view-terminal').classList.remove('flex');
+                document.getElementById('view-metrics').classList.remove('hidden');
+                renderNeoChart();
+            }
+        }
+
+        async function renderNeoChart() {
+            if (!jwtToken) return;
+            try {
+                const res = await fetch('/analytics/department-loads', { headers: getAuthHeaders() });
+                if (handleApiError(res)) return;
+                const data = await res.json();
+                
+                const labels = data.map(item => item.department.toUpperCase());
+                const totals = data.map(item => item.total);
+                const criticals = data.map(item => item.critical);
+
+                const ctx = document.getElementById('neoChart').getContext('2d');
+                if (myChart) { myChart.destroy(); }
+                myChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'TOTAL ACTIVE ENROLLED',
+                                data: totals,
+                                backgroundColor: '#1d4ed8',
+                                borderColor: '#000000',
+                                borderWidth: 3,
+                                borderRadius: 0,
+                            },
+                            {
+                                label: 'CRITICAL HIGH-RISK STROBE',
+                                data: criticals,
+                                backgroundColor: '#dc2626',
+                                borderColor: '#000000',
+                                borderWidth: 3,
+                                borderRadius: 0,
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        animation: false,
+                        plugins: {
+                            legend: {
+                                labels: {
+                                    font: { family: 'monospace', weight: 'bold', size: 14 },
+                                    color: '#000000'
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                grid: { color: '#000000', lineWidth: 2 },
+                                ticks: { font: { family: 'monospace', weight: 'bold' }, color: '#000000' }
+                            },
+                            y: {
+                                grid: { color: '#000000', lineWidth: 2 },
+                                ticks: { font: { family: 'monospace', weight: 'bold' }, color: '#000000' },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            } catch (error) {
+                console.error("Failed to render chart", error);
+            }
+        }
+
+        // --- State Management ---
+        const AppState = {
+            patients: [],
+            isOnline: true,
+            lang: 'en',
+            bionic: false
+        };
+
+        const i18n = {
+            en: {
+                intake_title: "Intake Gate", name_label: "Patient Name", age_label: "Age",
+                dept_label: "Target Department", complaint_label: "Primary Complaint",
+                voice_btn: "MIC: OFF", voice_btn_on: "MIC: ON", submit_btn: "Generate Token"
+            },
+            hi: {
+                intake_title: "प्रवेश द्वार", name_label: "मरीज का नाम", age_label: "आयु",
+                dept_label: "विभाग", complaint_label: "मुख्य शिकायत",
+                voice_btn: "माइक: बंद", voice_btn_on: "माइक: चालू", submit_btn: "टोकन बनाएं"
+            },
+            local: {
+                intake_title: "Entry Gate", name_label: "Name", age_label: "Umar",
+                dept_label: "Ward", complaint_label: "Dikkat",
+                voice_btn: "AWAZ: OFF", voice_btn_on: "AWAZ: ON", submit_btn: "Parchi Banao"
+            }
+        };
+
+        function logAction(msg) {
+            const logBox = document.getElementById('audit-log');
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false });
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.textContent = `[${time}] ${msg}`;
+            logBox.appendChild(entry);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function updateLang() {
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                const key = el.getAttribute('data-i18n');
+                el.textContent = i18n[AppState.lang][key];
+            });
+        }
+
+        function applyBionicReading() {
+            document.querySelectorAll('.bionic-target').forEach(el => {
+                if (AppState.bionic) {
+                    if(!el.dataset.original) el.dataset.original = el.textContent;
+                    const words = el.dataset.original.split(' ');
+                    const bionicText = words.map(w => {
+                        const mid = Math.ceil(w.length / 2);
+                        return `<b>${w.substring(0, mid)}</b>${w.substring(mid)}`;
+                    }).join(' ');
+                    el.innerHTML = bionicText;
+                    el.classList.add('bionic');
+                } else {
+                    if (el.dataset.original) {
+                        el.textContent = el.dataset.original;
+                        el.classList.remove('bionic');
+                    }
+                }
+            });
+        }
+
+        async function checkNetwork() {
+            try {
+                const res = await fetch('/ping', { cache: 'no-store' });
+                if (res.ok) {
+                    const justCameOnline = !AppState.isOnline;
+                    setOnlineStatus(true);
+                    
+                    if (justCameOnline) {
+                        setTimeout(async () => {
+                            if(jwtToken) {
+                                await syncOfflineQueue();
+                                await fetchPatients();
+                            }
+                        }, 500);
+                    } else {
+                        if(jwtToken) await fetchPatients();
+                    }
+                } else {
+                    setOnlineStatus(false);
+                }
+            } catch (e) {
+                setOnlineStatus(false);
+            }
+        }
+
+        function setOnlineStatus(isOnline) {
+            if (AppState.isOnline !== isOnline) {
+                AppState.isOnline = isOnline;
+                const pingEl = document.getElementById('ping-status');
+                const toast = document.getElementById('toast');
+                if (isOnline) {
+                    pingEl.style.backgroundColor = 'var(--safe-bg)';
+                    toast.style.display = 'none';
+                    logAction('NETWORK: ONLINE. Syncing...');
+                } else {
+                    pingEl.style.backgroundColor = 'var(--warn-bg)';
+                    toast.style.display = 'block';
+                    logAction('NETWORK: OFFLINE. Local caching active.');
+                }
+            }
+        }
+
+        async function syncOfflineQueue() {
+            const queue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+            if (queue.length > 0) {
+                logAction(`SYNC: Uploading ${queue.length} cached records`);
+                for (let i = 0; i < queue.length; i++) {
+                    const patient = queue[i];
+                    try {
+                        const res = await fetch('/patients', {
+                            method: 'POST',
+                            headers: getAuthHeaders(),
+                            body: JSON.stringify(patient)
+                        });
+                        
+                        if (handleApiError(res)) {
+                            // 401 occurred. Pause sync loop by returning early. 
+                            // The remaining queue is still in localStorage.
+                            logAction('SYNC: Halted due to 401 Expired Token');
+                            return; 
+                        }
+                        
+                        // Successfully uploaded, remove it from queue array
+                        queue.splice(i, 1);
+                        i--; // adjust index after removal
+                        localStorage.setItem('offlineQueue', JSON.stringify(queue));
+                    } catch (e) {
+                        console.error("Failed to sync", patient);
+                    }
+                }
+                logAction('SYNC: Complete');
+            }
+        }
+
+        async function fetchPatients() {
+            if (!AppState.isOnline || !jwtToken) return;
+            try {
+                const res = await fetch('/patients', { headers: getAuthHeaders() });
+                if (handleApiError(res)) return;
+                const data = await res.json();
+                AppState.patients = data;
+                renderKanban();
+            } catch (e) {
+                console.error("Fetch patients failed");
+            }
+        }
+        
+        let recognition = null;
+        if ('webkitSpeechRecognition' in window) {
+            recognition = new webkitSpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            
+            recognition.onresult = function(event) {
+                const text = event.results[0][0].transcript;
+                document.getElementById('p-complaint').value += (document.getElementById('p-complaint').value ? ' ' : '') + text;
+                logAction('VOICE INPUT CAPTURED');
+                checkFormValidity();
+            };
+            recognition.onend = function() {
+                const btn = document.getElementById('voice-btn');
+                btn.textContent = i18n[AppState.lang].voice_btn;
+                btn.style.backgroundColor = '#EF4444';
+            };
+        }
+
+        document.getElementById('voice-btn').addEventListener('click', function() {
+            if (!recognition) {
+                alert("Web Speech API not supported in this browser.");
+                return;
+            }
+            if (this.textContent.includes('OFF')) {
+                recognition.start();
+                this.textContent = i18n[AppState.lang].voice_btn_on;
+                this.style.backgroundColor = '#10B981';
+            } else {
+                recognition.stop();
+            }
+        });
+
+        function checkFormValidity() {
+            const form = document.getElementById('intake-form');
+            const tick = document.getElementById('validation-tick');
+            if (form.checkValidity()) {
+                tick.style.display = 'block';
+            } else {
+                tick.style.display = 'none';
+            }
+        }
+        document.getElementById('intake-form').addEventListener('input', checkFormValidity);
+
+        document.getElementById('intake-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const tempToken = `TMP-${Date.now().toString().slice(-4)}`;
+            
+            const patientData = {
+                name: document.getElementById('p-name').value,
+                age: parseInt(document.getElementById('p-age').value),
+                complaint: document.getElementById('p-complaint').value,
+                department: document.getElementById('p-dept').value,
+                token: tempToken
+            };
+
+            if (!AppState.isOnline) {
+                cacheOffline(patientData);
+                this.reset();
+                document.getElementById('validation-tick').style.display = 'none';
+                return;
+            }
+
+            try {
+                const res = await fetch('/patients', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify(patientData)
+                });
+                
+                if (handleApiError(res)) {
+                    cacheOffline(patientData);
+                    this.reset();
+                    return;
+                }
+                
+                const created = await res.json();
+                logAction(`SUCCESS: TOKEN ${created.token} INTAKE GENERATED`);
+                await fetchPatients();
+            } catch (error) {
+                console.error("Triage dispatch error:", error);
+                cacheOffline(patientData);
+            }
+
+            this.reset();
+            document.getElementById('validation-tick').style.display = 'none';
+        });
+
+        function cacheOffline(patientData) {
+            const queue = JSON.parse(localStorage.getItem('offlineQueue') || '[]');
+            queue.push(patientData);
+            localStorage.setItem('offlineQueue', JSON.stringify(queue));
+            
+            const mockPatient = { ...patientData, urgency: 'Medium', summary: 'PENDING SYNC', wait_time_seconds: 0, created_at: new Date().toISOString() };
+            AppState.patients.push(mockPatient);
+            renderKanban();
+            logAction(`OFFLINE: TOKEN ${patientData.token} CACHED LOCALLY`);
+        }
+
+        function getUrgColor(u) {
+            if (u === 'High') return 'var(--danger-bg)';
+            if (u === 'Medium') return 'var(--warn-bg)';
+            return 'var(--safe-bg)';
+        }
+
+        function renderKanban() {
+            const board = document.getElementById('kanban-board');
+            const existingIds = Array.from(board.children).map(c => c.id);
+            board.innerHTML = '';
+            
+            AppState.patients.forEach(p => {
+                const isNew = !existingIds.includes(`card-${p.token}`);
+                const card = document.createElement('div');
+                card.id = `card-${p.token}`;
+                card.className = `brutal-border brutal-shadow p-4 bg-white relative ${isNew ? 'animate-pop' : ''}`;
+                
+                if (p.urgency === 'High' && p.wait_time_seconds > 10) {
+                    card.classList.add('strobe-alert');
+                }
+                const uColor = getUrgColor(p.urgency);
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="font-bold text-xl mono cursor-pointer hover:underline" onclick="showQR('${p.token}')">${p.token}</div>
+                        <div class="brutal-border px-2 py-1 text-xs mono font-bold" style="background-color: ${uColor}">${p.urgency}</div>
+                    </div>
+                    <div class="font-bold text-lg mb-1">${p.name}, <span class="font-normal">${p.age}</span></div>
+                    <div class="text-sm mb-4">Dept: <span class="font-bold">${p.department}</span></div>
+                    <div class="text-sm italic border-l-4 border-black pl-2 mb-4">${p.complaint}</div>
+                    
+                    <div class="border-2 border-black p-2 mt-2 mb-4 bg-black text-white font-mono text-xs uppercase tracking-wider">
+                        AI NOTE: ${p.summary || 'PENDING SYNC'}
+                    </div>
+
+                    <div class="flex justify-between items-center mt-2 border-t-4 border-black pt-2">
+                        <div class="mono text-xs font-bold">Wait: <span id="wait-${p.token}">${p.wait_time_seconds}</span>s</div>
+                        <div class="flex gap-2">
+                            <button onclick="exportCardToPDF('card-${p.token}')" class="brutal-border bg-yellow-400 text-black text-xs px-2 py-1 font-bold">EXPORT PDF</button>
+                            <button onclick="escalate('${p.token}')" class="brutal-border bg-black text-white text-xs px-2 py-1 font-bold">ESCALATE</button>
+                        </div>
+                    </div>
+                `;
+                board.appendChild(card);
+            });
+        }
+
+        window.escalate = async function(token) {
+            logAction(`ACTION: ESCALATE ${token}`);
+            if (AppState.isOnline && jwtToken) {
+                try {
+                    const res = await fetch(`/patients/${token}/escalate`, { method: 'PUT', headers: getAuthHeaders() });
+                    if (handleApiError(res)) return;
+                    await fetchPatients();
+                } catch (e) {
+                    console.error(e);
+                }
+            } else {
+                const idx = AppState.patients.findIndex(p => p.token === token);
+                if (idx > -1) {
+                    const p = AppState.patients.splice(idx, 1)[0];
+                    AppState.patients.unshift(p);
+                    renderKanban();
+                }
+            }
+        };
+
+        // Snapshot PDF Function
+        window.exportCardToPDF = async function(cardId) {
+            logAction(`ACTION: EXPORT PDF for ${cardId}`);
+            const { jsPDF } = window.jspdf;
+            const element = document.getElementById(cardId);
+            
+            // Temporary freeze strobe effect to ensure clean snapshot
+            const wasStrobing = element.classList.contains('strobe-alert');
+            if (wasStrobing) element.classList.remove('strobe-alert');
+
+            const canvas = await html2canvas(element, {
+                scale: 2, 
+                logging: false,
+                useCORS: true
+            });
+            
+            if (wasStrobing) element.classList.add('strobe-alert');
+            
+            const imgData = canvas.toDataURL('image/png');
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            
+            const imgWidth = 190; 
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            
+            pdf.addImage(imgData, 'PNG', 10, 10, imgWidth, imgHeight);
+            pdf.save(`MEDVIBE-REPORT-${cardId.toUpperCase()}.pdf`);
+        }
+
+        window.showQR = function(token) {
+            const p = AppState.patients.find(x => x.token === token);
+            if(!p) return;
+            
+            document.getElementById('qr-modal').style.display = 'flex';
+            document.getElementById('qr-title').textContent = `Token: ${token}`;
+            
+            const qrContainer = document.getElementById('qrcode-container');
+            qrContainer.innerHTML = '';
+            new QRCode(qrContainer, {
+                text: JSON.stringify({t: token, n: p.name, u: p.urgency}),
+                width: 128, height: 128,
+                colorDark: "#000000", colorLight: "#ffffff"
+            });
+            
+            document.getElementById('qr-details').innerHTML = `
+                Name: ${p.name}<br>
+                Dept: ${p.department}<br>
+                Urgency: <span style="background-color:${getUrgColor(p.urgency)}; padding:2px;">${p.urgency}</span>
+            `;
+            logAction(`ACTION: QR VIEW ${token}`);
+        };
+
+        document.getElementById('report-btn').addEventListener('click', () => {
+            document.getElementById('report-modal').style.display = 'flex';
+            
+            const total = AppState.patients.length;
+            const high = AppState.patients.filter(p => p.urgency === 'High').length;
+            const breaches = AppState.patients.filter(p => p.urgency === 'High' && p.wait_time_seconds > 10).length;
+            
+            const content = `
+=== MEDVIBE EXECUTIVE REPORT ===
+Time: ${new Date().toLocaleString()}
+
+Total Queue Volume: ${total}
+Critical Cases:     ${high}
+Threshold Breaches: ${breaches}
+
+--- Queue Dump ---
+${AppState.patients.map(p => `[${p.token}] ${p.name} - ${p.urgency} - ${p.wait_time_seconds}s wait`).join('\n')}
+            `;
+            document.getElementById('report-content').textContent = content.trim();
+            logAction('ACTION: REPORT GENERATED');
+        });
+
+        document.getElementById('purge-btn').addEventListener('click', async () => {
+            if (confirm("Clear all processed entries?")) {
+                if (AppState.isOnline && jwtToken) {
+                    const res = await fetch('/patients', { method: 'DELETE', headers: getAuthHeaders() });
+                    if(handleApiError(res)) return;
+                }
+                AppState.patients = [];
+                localStorage.removeItem('offlineQueue');
+                renderKanban();
+                logAction('ACTION: QUEUE PURGED');
+            }
+        });
+
+        document.querySelectorAll('.close-modal').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.target.closest('.modal').style.display = 'none';
+            });
+        });
+
+        document.getElementById('lang-toggle').addEventListener('click', function() {
+            const langs = ['en', 'hi', 'local'];
+            let idx = langs.indexOf(AppState.lang) + 1;
+            if(idx >= langs.length) idx = 0;
+            AppState.lang = langs[idx];
+            this.textContent = AppState.lang.toUpperCase();
+            updateLang();
+            logAction(`SET LANG: ${AppState.lang.toUpperCase()}`);
+        });
+
+        document.getElementById('bionic-toggle').addEventListener('click', function() {
+            AppState.bionic = !AppState.bionic;
+            this.textContent = `BIONIC: ${AppState.bionic ? 'ON' : 'OFF'}`;
+            this.style.backgroundColor = AppState.bionic ? '#10B981' : '#000000';
+            applyBionicReading();
+            logAction(`BIONIC MODE: ${AppState.bionic ? 'ON' : 'OFF'}`);
+        });
+
+        // --- AI Refine Logic ---
+        let refineHistory = [];
+        const refineWindow = document.getElementById('refine-chat-window');
+        
+        document.getElementById('refine-btn').addEventListener('click', () => {
+            document.getElementById('refine-modal').style.display = 'flex';
+            const complaint = document.getElementById('p-complaint').value;
+            refineHistory = [
+                { role: "user", content: `Initial Complaint: ${complaint || "None provided yet"}` }
+            ];
+            refineWindow.innerHTML = '';
+            document.getElementById('refine-apply-btn').classList.add('hidden');
+            sendRefineChat("Please ask me 1 or 2 follow-up questions to refine this complaint.");
+        });
+
+        function appendRefineMsg(role, text) {
+            const div = document.createElement('div');
+            div.className = `p-2 font-mono text-sm border-2 border-black ${role === 'user' ? 'bg-blue-200 self-end ml-12' : 'bg-green-200 self-start mr-12'}`;
+            div.textContent = text;
+            refineWindow.appendChild(div);
+            refineWindow.scrollTop = refineWindow.scrollHeight;
+        }
+
+        async function sendRefineChat(hiddenInitialMsg = null) {
+            const inputEl = document.getElementById('refine-input');
+            const text = hiddenInitialMsg || inputEl.value.trim();
+            if(!hiddenInitialMsg && !text) return;
+
+            if(!hiddenInitialMsg) {
+                appendRefineMsg('user', text);
+                refineHistory.push({ role: 'user', content: text });
+                inputEl.value = '';
+            }
+
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ mode: 'refine', history: refineHistory })
+                });
+                const data = await res.json();
+                
+                if (data.response.includes('[DONE]')) {
+                    const msg = data.response.replace('[DONE]', '').trim();
+                    if(msg) appendRefineMsg('assistant', msg);
+                    document.getElementById('refine-apply-btn').classList.remove('hidden');
+                } else {
+                    appendRefineMsg('assistant', data.response);
+                    refineHistory.push({ role: 'assistant', content: data.response });
+                }
+            } catch (e) {
+                appendRefineMsg('assistant', 'ERROR CONNECTING TO AI.');
+            }
+        }
+
+        document.getElementById('refine-send-btn').addEventListener('click', () => sendRefineChat());
+        document.getElementById('refine-input').addEventListener('keypress', (e) => { if(e.key === 'Enter') sendRefineChat(); });
+        
+        document.getElementById('refine-apply-btn').addEventListener('click', () => {
+            const summaryLog = refineHistory.filter(h => h.role === 'user').map(h => h.content).join(' | ');
+            document.getElementById('p-complaint').value = summaryLog;
+            document.getElementById('refine-modal').style.display = 'none';
+        });
+
+        setInterval(() => {
+            checkNetwork();
+            if (!document.getElementById('view-metrics').classList.contains('hidden') && AppState.isOnline && jwtToken) {
+                renderNeoChart();
+            }
+        }, 3000); 
+        
+        setInterval(() => {
+            AppState.patients.forEach(p => {
+                p.wait_time_seconds++;
+                const w = document.getElementById(`wait-${p.token}`);
+                if (w) w.textContent = p.wait_time_seconds;
+            });
+            renderKanban();
+        }, 1000);
+
+        applyBionicReading();
+        checkAuth();
+        checkNetwork();
+    </script>
+</body>
+</html>

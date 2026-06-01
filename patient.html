@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedVibe | Patient Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #000; color: #fff; font-family: 'Inter', monospace; margin:0; padding:0; display: flex; flex-direction: column; height: 100vh;}
+        .brutal-border { border: 3px solid #fff; }
+        .msg { padding: 0.5rem; border: 2px solid #fff; margin-bottom: 0.5rem; width: 85%; }
+        .ai-msg { background-color: #33FF99; color: black; align-self: flex-start; }
+        .user-msg { background-color: #0052FF; color: white; align-self: flex-end; margin-left: 15%; }
+        #chat-window { flex-grow: 1; overflow-y: auto; display: flex; flex-direction: column; padding: 1rem; }
+    </style>
+</head>
+<body class="p-4">
+    <div class="brutal-border bg-white text-black p-4 mb-4">
+        <h1 class="text-3xl font-black uppercase tracking-widest border-b-4 border-black mb-2 text-center" id="portal-title">Loading...</h1>
+        <div class="flex justify-between items-center text-xl font-bold font-mono">
+            <span>WAIT TIME:</span>
+            <span class="bg-red-500 text-white px-2 py-1" id="wait-time">-- s</span>
+        </div>
+    </div>
+
+    <div class="brutal-border flex-grow flex flex-col bg-black">
+        <div class="bg-yellow-400 text-black font-bold uppercase p-2 text-center text-sm border-b-2 border-white">
+            Live Support Chat
+        </div>
+        <div id="chat-window">
+            <div class="msg ai-msg font-mono text-sm font-bold">I am your support AI. You can ask me questions while you wait.</div>
+        </div>
+        <div class="flex border-t-2 border-white">
+            <input type="text" id="user-input" class="flex-grow p-3 bg-black text-white font-mono outline-none" placeholder="Message..." autocomplete="off">
+            <button id="send-btn" class="bg-white text-black px-4 font-bold uppercase hover:bg-gray-300">SEND</button>
+        </div>
+    </div>
+
+    <script>
+        const token = window.location.pathname.split('/').pop();
+        const chatWindow = document.getElementById('chat-window');
+        const input = document.getElementById('user-input');
+        
+        let historyLog = [{ role: "assistant", content: "I am your support AI. You can ask me questions while you wait." }];
+
+        async function loadPatientData() {
+            try {
+                const res = await fetch(`/patients/${token}`);
+                if(res.ok) {
+                    const data = await res.json();
+                    document.getElementById('portal-title').textContent = `TOKEN: ${data.token}`;
+                    document.getElementById('wait-time').textContent = `${data.wait_time_seconds} s`;
+                } else {
+                    document.getElementById('portal-title').textContent = `TOKEN NOT FOUND`;
+                }
+            } catch (e) {}
+        }
+        
+        setInterval(loadPatientData, 3000);
+        loadPatientData();
+
+        function appendMsg(role, text) {
+            const div = document.createElement('div');
+            div.className = `msg font-mono text-sm font-bold ${role === 'user' ? 'user-msg' : 'ai-msg'}`;
+            div.textContent = text;
+            chatWindow.appendChild(div);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const text = input.value.trim();
+            if (!text) return;
+            appendMsg('user', text);
+            historyLog.push({ role: 'user', content: text });
+            input.value = '';
+            
+            const payload = { mode: 'support', history: historyLog };
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
+                appendMsg('assistant', data.response);
+                historyLog.push({ role: 'assistant', content: data.response });
+            } catch (e) {
+                appendMsg('assistant', 'ERROR CONNECTING TO SUPPORT AI.');
+            }
+        }
+
+        document.getElementById('send-btn').addEventListener('click', sendMessage);
+        input.addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
+    </script>
+</body>
+</html>
